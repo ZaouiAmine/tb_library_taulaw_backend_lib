@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"github.com/taubyte/go-sdk/database"
 	"github.com/taubyte/go-sdk/event"
 	httpevent "github.com/taubyte/go-sdk/http/event"
@@ -2062,6 +2063,37 @@ func listByPrefix[T any](db database.Database, prefix string) ([]T, error) {
 	return out, nil
 }
 
+// seedKvDemoLawyers inserts accepted lawyer users into KV for dashboard / users-lawyers lists (idempotent per user id).
+func seedKvDemoLawyers(db database.Database) error {
+	cities := []string{
+		"Algiers", "Oran", "Constantine", "Annaba", "Blida", "Batna", "Sétif", "Djelfa", "Sidi Bel Abbès", "Biskra",
+		"Tébessa", "Tiaret", "Béjaïa", "Tizi Ouzou", "Jijel", "Mostaganem", "Médéa", "Boumerdès", "El Oued", "Skikda",
+	}
+	for i := 1; i <= 40; i++ {
+		id := fmt.Sprintf("usr_demo_law_%03d", i)
+		if _, err := db.Get(userKey(id)); err == nil {
+			continue
+		}
+		email := fmt.Sprintf("demo.lawyer.%d@seed.taulaw.dev", i)
+		u := &kvUser{
+			ID:                 id,
+			Name:               fmt.Sprintf("Seed Lawyer %d", i),
+			Email:              normalize(email),
+			Phone:              fmt.Sprintf("+213550%05d", (i*7919)%100000),
+			Address:            cities[(i-1)%len(cities)],
+			Role:               userRoleLawyer,
+			Status:             userStatusAccepted,
+			IsEmailVerified:    true,
+			VerificationStatus: 1,
+			PasswordHash:       hashPassword("demo-seed-unused"),
+		}
+		if err := u.save(db); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func seedDefaultData() error {
 	adminDB, err := database.New(adminUsersMatcher)
 	if err != nil {
@@ -2130,11 +2162,17 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultStates := []localizedName{
-		{ID: "state_1", NameAr: "الجزائر", NameEn: "Algiers", NameFr: "Alger"},
-		{ID: "state_2", NameAr: "وهران", NameEn: "Oran", NameFr: "Oran"},
+	stateNames := []struct{ en, ar, fr string }{
+		{"Algiers", "الجزائر", "Alger"}, {"Oran", "وهران", "Oran"}, {"Constantine", "قسنطينة", "Constantine"},
+		{"Annaba", "عنابة", "Annaba"}, {"Blida", "البليدة", "Blida"}, {"Batna", "باتنة", "Batna"},
+		{"Sétif", "سطيف", "Sétif"}, {"Djelfa", "الجلفة", "Djelfa"}, {"Sidi Bel Abbès", "سيدي بلعباس", "Sidi Bel Abbès"},
+		{"Biskra", "بسكرة", "Biskra"}, {"Tébessa", "تبسة", "Tébessa"}, {"Tiaret", "تيارت", "Tiaret"},
+		{"Béjaïa", "بجاية", "Béjaïa"}, {"Tizi Ouzou", "تيزي وزو", "Tizi Ouzou"}, {"Jijel", "جيجل", "Jijel"},
+		{"Mostaganem", "مستغانم", "Mostaganem"}, {"Médéa", "المدية", "Médéa"}, {"Boumerdès", "بومرداس", "Boumerdès"},
 	}
-	for _, row := range defaultStates {
+	for i, sn := range stateNames {
+		id := fmt.Sprintf("state_%d", i+1)
+		row := localizedName{ID: id, NameAr: sn.ar, NameEn: sn.en, NameFr: sn.fr}
 		key := "states/" + row.ID
 		if _, getErr := statesDB.Get(key); getErr != nil {
 			if putErr := putJSON(statesDB, key, row); putErr != nil {
@@ -2143,11 +2181,17 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultSpecializations := []localizedName{
-		{ID: "spec_1", NameAr: "قانون مدني", NameEn: "Civil Law", NameFr: "Droit Civil"},
-		{ID: "spec_2", NameAr: "قانون تجاري", NameEn: "Commercial Law", NameFr: "Droit Commercial"},
+	specNames := []struct{ en, ar, fr string }{
+		{"Civil Law", "قانون مدني", "Droit civil"}, {"Commercial Law", "قانون تجاري", "Droit commercial"},
+		{"Criminal Law", "قانون جنائي", "Droit pénal"}, {"Labor Law", "قانون الشغل", "Droit du travail"},
+		{"Tax Law", "قانون الضرائب", "Droit fiscal"}, {"IP Law", "الملكية الفكرية", "Propriété intellectuelle"},
+		{"Family Law", "قانون الأسرة", "Droit de la famille"}, {"Administrative Law", "قانون إداري", "Droit administratif"},
+		{"Banking Law", "قانون بنكي", "Droit bancaire"}, {"Immigration", "هجرة", "Immigration"},
+		{"Insurance", "تأمين", "Assurance"}, {"Real Estate", "عقارات", "Immobilier"},
 	}
-	for _, row := range defaultSpecializations {
+	for i, sn := range specNames {
+		id := fmt.Sprintf("spec_%d", i+1)
+		row := localizedName{ID: id, NameAr: sn.ar, NameEn: sn.en, NameFr: sn.fr}
 		key := "specializations/" + row.ID
 		if _, getErr := specializationsDB.Get(key); getErr != nil {
 			if putErr := putJSON(specializationsDB, key, row); putErr != nil {
@@ -2156,12 +2200,15 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultPendingLawyers := []pendingLawyer{
-		{ID: "lawyer_1", FullName: "Nadia Benali", Email: "nadia.benali@example.com", VerificationStatus: "pending"},
-		{ID: "lawyer_2", FullName: "Yacine Bouchareb", Email: "yacine.bouchareb@example.com", VerificationStatus: "pending"},
-	}
-	for _, row := range defaultPendingLawyers {
-		key := "pending_lawyers/" + row.ID
+	for i := 1; i <= 24; i++ {
+		id := fmt.Sprintf("lawyer_%d", i)
+		row := pendingLawyer{
+			ID:                 id,
+			FullName:           fmt.Sprintf("Pending Lawyer %d", i),
+			Email:              fmt.Sprintf("pending.lawyer.%d@example.com", i),
+			VerificationStatus: "pending",
+		}
+		key := "pending_lawyers/" + id
 		if _, getErr := pendingLawyersDB.Get(key); getErr != nil {
 			if putErr := putJSON(pendingLawyersDB, key, row); putErr != nil {
 				return putErr
@@ -2169,12 +2216,20 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultReports := []reportItem{
-		{ID: "report_1", Reason: "Abusive comment", Status: "pending"},
-		{ID: "report_2", Reason: "Fraud suspicion", Status: "pending"},
+	reportReasons := []string{
+		"Abusive comment", "Fraud suspicion", "Spam", "Harassment", "Impersonation", "Copyright claim",
+		"Off-topic content", "Hate speech", "Scam listing", "Fake profile", "Threats", "Privacy violation",
+		"Malware link", "Solicitation", "Underage content", "Doxxing", "Duplicate post", "Misinformation",
 	}
-	for _, row := range defaultReports {
-		key := "reports/" + row.ID
+	reportStatuses := []string{"pending", "pending", "reviewed", "accepted", "rejected"}
+	for i := 1; i <= 60; i++ {
+		id := fmt.Sprintf("report_%d", i)
+		row := reportItem{
+			ID:     id,
+			Reason: reportReasons[(i-1)%len(reportReasons)],
+			Status: reportStatuses[i%len(reportStatuses)],
+		}
+		key := "reports/" + id
 		if _, getErr := reportsDB.Get(key); getErr != nil {
 			if putErr := putJSON(reportsDB, key, row); putErr != nil {
 				return putErr
@@ -2182,13 +2237,18 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultCaseCategories := []localizedName{
-		{ID: "category_1", NameAr: "قضايا الأسرة", NameEn: "Family Cases", NameFr: "Affaires Familiales"},
-		{ID: "category_2", NameAr: "القضايا التجارية", NameEn: "Commercial Cases", NameFr: "Affaires Commerciales"},
-		{ID: "category_3", NameAr: "القضايا الجنائية", NameEn: "Criminal Cases", NameFr: "Affaires Pénales"},
+	catNames := []struct{ en, ar, fr string }{
+		{"Family Cases", "قضايا الأسرة", "Affaires familiales"}, {"Commercial Cases", "قضايا تجارية", "Affaires commerciales"},
+		{"Criminal Cases", "قضايا جنائية", "Affaires pénales"}, {"Labor Disputes", "نزاعات شغل", "Conflits du travail"},
+		{"Tax Appeals", "طعون ضريبية", "Recours fiscal"}, {"IP Disputes", "ملكية فكرية", "Propriété intellectuelle"},
+		{"Real Estate", "عقاري", "Immobilier"}, {"Insurance", "تأمين", "Assurance"}, {"Banking", "بنوك", "Banque"},
+		{"Medical Liability", "مسؤولية طبية", "Responsabilité médicale"}, {"Construction", "إنشاءات", "Construction"},
+		{"Maritime", "بحري", "Maritime"},
 	}
-	for _, row := range defaultCaseCategories {
-		key := "case_categories/" + row.ID
+	for i, sn := range catNames {
+		id := fmt.Sprintf("category_%d", i+1)
+		row := localizedName{ID: id, NameAr: sn.ar, NameEn: sn.en, NameFr: sn.fr}
+		key := "case_categories/" + id
 		if _, getErr := caseCategoriesDB.Get(key); getErr != nil {
 			if putErr := putJSON(caseCategoriesDB, key, row); putErr != nil {
 				return putErr
@@ -2196,13 +2256,18 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultCaseChambers := []localizedName{
-		{ID: "chamber_1", NameAr: "الغرفة المدنية", NameEn: "Civil Chamber", NameFr: "Chambre Civile"},
-		{ID: "chamber_2", NameAr: "الغرفة التجارية", NameEn: "Commercial Chamber", NameFr: "Chambre Commerciale"},
-		{ID: "chamber_3", NameAr: "الغرفة الجزائية", NameEn: "Criminal Chamber", NameFr: "Chambre Pénale"},
+	chamberNames := []struct{ en, ar, fr string }{
+		{"Civil Chamber", "الغرفة المدنية", "Chambre civile"}, {"Commercial Chamber", "الغرفة التجارية", "Chambre commerciale"},
+		{"Criminal Chamber", "الغرفة الجزائية", "Chambre pénale"}, {"Labor Chamber", "غرفة الشغل", "Chambre sociale"},
+		{"Appeals Chamber", "غرفة الاستئناف", "Chambre d'appel"}, {"Youth Chamber", "غرفة الأحداث", "Chambre des mineurs"},
+		{"Administrative Chamber", "غرفة إدارية", "Chambre administrative"}, {"Tax Chamber", "غرفة ضريبية", "Chambre fiscale"},
+		{"Family Chamber", "غرفة الأسرة", "Chambre familiale"}, {"Summary Chamber", "غرفة مستعجلة", "Chambre référés"},
+		{"Enforcement Chamber", "غرفة التنفيذ", "Chambre d'exécution"}, {"Grand Chamber", "غرفة موحدة", "Chambre unifiée"},
 	}
-	for _, row := range defaultCaseChambers {
-		key := "case_chambers/" + row.ID
+	for i, sn := range chamberNames {
+		id := fmt.Sprintf("chamber_%d", i+1)
+		row := localizedName{ID: id, NameAr: sn.ar, NameEn: sn.en, NameFr: sn.fr}
+		key := "case_chambers/" + id
 		if _, getErr := caseChambersDB.Get(key); getErr != nil {
 			if putErr := putJSON(caseChambersDB, key, row); putErr != nil {
 				return putErr
@@ -2210,13 +2275,17 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultCasePhases := []localizedName{
-		{ID: "phase_1", NameAr: "إيداع الملف", NameEn: "Case Filing", NameFr: "Dépôt du dossier"},
-		{ID: "phase_2", NameAr: "جلسة الاستماع", NameEn: "Hearing", NameFr: "Audience"},
-		{ID: "phase_3", NameAr: "الحكم", NameEn: "Judgment", NameFr: "Jugement"},
+	phaseNames := []struct{ en, ar, fr string }{
+		{"Case Filing", "إيداع الملف", "Dépôt du dossier"}, {"Hearing", "جلسة استماع", "Audience"},
+		{"Judgment", "الحكم", "Jugement"}, {"Appeal", "استئناف", "Appel"}, {"Evidence", "إثبات", "Preuve"},
+		{"Mediation", "وساطة", "Médiation"}, {"Expert Report", "خبرة", "Expertise"}, {"Closure", "إغلاق", "Clôture"},
+		{"Settlement", "تسوية", "Transaction"}, {"Re-trial", "إعادة نظر", "Révision"},
+		{"Execution", "تنفيذ", "Exécution"}, {"Archive", "أرشفة", "Archivage"},
 	}
-	for _, row := range defaultCasePhases {
-		key := "case_phases/" + row.ID
+	for i, sn := range phaseNames {
+		id := fmt.Sprintf("phase_%d", i+1)
+		row := localizedName{ID: id, NameAr: sn.ar, NameEn: sn.en, NameFr: sn.fr}
+		key := "case_phases/" + id
 		if _, getErr := casePhasesDB.Get(key); getErr != nil {
 			if putErr := putJSON(casePhasesDB, key, row); putErr != nil {
 				return putErr
@@ -2224,12 +2293,20 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultBanners := []bannerItem{
-		{ID: "banner_1", Image: "seed-banner-1.jpg", Link: "https://lawgen.app/promo/1", Status: "active", Type: "lawyer"},
-		{ID: "banner_2", Image: "seed-banner-2.jpg", Link: "https://lawgen.app/promo/2", Status: "active", Type: "client"},
-	}
-	for _, row := range defaultBanners {
-		key := "banners/" + row.ID
+	for i := 1; i <= 18; i++ {
+		id := fmt.Sprintf("banner_%d", i)
+		typ := "lawyer"
+		if i%2 == 0 {
+			typ = "client"
+		}
+		row := bannerItem{
+			ID:     id,
+			Image:  fmt.Sprintf("seed-banner-%d.jpg", i),
+			Link:   fmt.Sprintf("https://taulaw.demo/promo/%d", i),
+			Status: "active",
+			Type:   typ,
+		}
+		key := "banners/" + id
 		if _, getErr := bannersDB.Get(key); getErr != nil {
 			if putErr := putJSON(bannersDB, key, row); putErr != nil {
 				return putErr
@@ -2237,13 +2314,16 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultConsultations := []consultationPackage{
-		{ID: "consult_1", Name: "Basic Consultation", NumberOfConsultations: 3, Price: 49.99, IsActive: true},
-		{ID: "consult_2", Name: "Business Consultation", NumberOfConsultations: 8, Price: 149.00, IsActive: true},
-		{ID: "consult_3", Name: "Premium Consultation", NumberOfConsultations: 15, Price: 249.00, IsActive: true},
-	}
-	for _, row := range defaultConsultations {
-		key := "consultation_packages/" + row.ID
+	for i := 1; i <= 20; i++ {
+		id := fmt.Sprintf("consult_%d", i)
+		row := consultationPackage{
+			ID:                    id,
+			Name:                  fmt.Sprintf("Consultation Pack %d", i),
+			NumberOfConsultations: 3 + (i % 12),
+			Price:                 float64(29 + i*11),
+			IsActive:              true,
+		}
+		key := "consultation_packages/" + id
 		if _, getErr := consultationsDB.Get(key); getErr != nil {
 			if putErr := putJSON(consultationsDB, key, row); putErr != nil {
 				return putErr
@@ -2252,13 +2332,20 @@ func seedDefaultData() error {
 	}
 
 	now := time.Now().UTC()
-	defaultLawyerPackages := []lawyerPackage{
-		{ID: "pkg_1", Name: "Starter", NumberOfCases: 20, NumberOfAssistants: 1, Price: 39.00, DurationInDays: 30, IsActive: true, CreatedAt: now.AddDate(0, -2, 0).Format(time.RFC3339)},
-		{ID: "pkg_2", Name: "Growth", NumberOfCases: 60, NumberOfAssistants: 3, Price: 99.00, DurationInDays: 90, IsActive: true, CreatedAt: now.AddDate(0, -1, 0).Format(time.RFC3339)},
-		{ID: "pkg_3", Name: "Enterprise", NumberOfCases: 200, NumberOfAssistants: 10, Price: 249.00, DurationInDays: 365, IsActive: true, CreatedAt: now.AddDate(0, 0, -15).Format(time.RFC3339)},
-	}
-	for _, row := range defaultLawyerPackages {
-		key := "lawyer_packages/" + row.ID
+	pkgNames := []string{"Starter", "Growth", "Pro", "Enterprise", "Trial", "Annual", "Quarterly", "Team", "Solo", "Scale"}
+	for i := 1; i <= 10; i++ {
+		id := fmt.Sprintf("pkg_%d", i)
+		row := lawyerPackage{
+			ID:                 id,
+			Name:               pkgNames[i-1],
+			NumberOfCases:      10 + i*15,
+			NumberOfAssistants: 1 + (i % 5),
+			Price:              float64(29 + i*25),
+			DurationInDays:     30 * (1 + (i % 4)),
+			IsActive:           true,
+			CreatedAt:          now.AddDate(0, -(i % 6), -i).Format(time.RFC3339),
+		}
+		key := "lawyer_packages/" + id
 		if _, getErr := lawyerPackagesDB.Get(key); getErr != nil {
 			if putErr := putJSON(lawyerPackagesDB, key, row); putErr != nil {
 				return putErr
@@ -2266,13 +2353,20 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultLawyerRequests := []lawyerRequestItem{
-		{ID: "request_1", Name: "Karim Saadi", Email: "karim.saadi@example.com", Phone: "+213550001111", Address: "Algiers", Status: 0, Role: 2, IsEmailVerified: true},
-		{ID: "request_2", Name: "Amina Hadj", Email: "amina.hadj@example.com", Phone: "+213550002222", Address: "Oran", Status: 0, Role: 2, IsEmailVerified: true},
-		{ID: "request_3", Name: "Sofiane Rahal", Email: "sofiane.rahal@example.com", Phone: "+213550003333", Address: "Constantine", Status: 1, Role: 2, IsEmailVerified: true},
-	}
-	for _, row := range defaultLawyerRequests {
-		key := "lawyer_requests/" + row.ID
+	cities := []string{"Algiers", "Oran", "Constantine", "Annaba", "Blida", "Batna", "Sétif", "Djelfa", "Tizi Ouzou", "Béjaïa"}
+	for i := 1; i <= 40; i++ {
+		id := fmt.Sprintf("request_%d", i)
+		row := lawyerRequestItem{
+			ID:              id,
+			Name:            fmt.Sprintf("Request Lawyer %d", i),
+			Email:           fmt.Sprintf("law.request.%d@example.com", i),
+			Phone:           fmt.Sprintf("+213550%05d", (i*4241)%100000),
+			Address:         cities[(i-1)%len(cities)],
+			Status:          i % 3,
+			Role:            2,
+			IsEmailVerified: true,
+		}
+		key := "lawyer_requests/" + id
 		if _, getErr := lawyerRequestsDB.Get(key); getErr != nil {
 			if putErr := putJSON(lawyerRequestsDB, key, row); putErr != nil {
 				return putErr
@@ -2280,45 +2374,63 @@ func seedDefaultData() error {
 		}
 	}
 
-	defaultSubscriptions := []subscriptionItem{
-		{
-			ID: "sub_1", LawyerID: "request_1", LawyerName: "Karim Saadi", PackageID: "pkg_2", PackageName: "Growth",
-			StartDate: now.AddDate(0, -1, 0).Format(time.RFC3339), EndDate: now.AddDate(0, 2, 0).Format(time.RFC3339),
-			Status: "active", Price: 99.00, CreatedAt: now.AddDate(0, -1, 0).Format(time.RFC3339),
-		},
-		{
-			ID: "sub_2", LawyerID: "request_2", LawyerName: "Amina Hadj", PackageID: "pkg_1", PackageName: "Starter",
-			StartDate: now.AddDate(0, -3, 0).Format(time.RFC3339), EndDate: now.AddDate(0, -1, -5).Format(time.RFC3339),
-			Status: "expired", Price: 39.00, CreatedAt: now.AddDate(0, -3, 0).Format(time.RFC3339),
-		},
-	}
-	for i := range defaultSubscriptions {
-		defaultSubscriptions[i].Lawyer = struct {
+	subStatuses := []string{"active", "active", "expired", "cancelled", "pending"}
+	for i := 1; i <= 30; i++ {
+		lawyerIdx := ((i - 1) % 40) + 1
+		pkgIdx := ((i - 1) % 10) + 1
+		lawyerID := fmt.Sprintf("request_%d", lawyerIdx)
+		lawyerName := fmt.Sprintf("Request Lawyer %d", lawyerIdx)
+		pkgID := fmt.Sprintf("pkg_%d", pkgIdx)
+		pkgName := pkgNames[pkgIdx-1]
+		price := float64(29 + pkgIdx*25)
+		start := now.AddDate(0, -(i % 8), -i)
+		end := start.AddDate(0, 2+(i%4), 0)
+		row := subscriptionItem{
+			ID:          fmt.Sprintf("sub_%d", i),
+			LawyerID:    lawyerID,
+			LawyerName:  lawyerName,
+			PackageID:   pkgID,
+			PackageName: pkgName,
+			StartDate:   start.Format(time.RFC3339),
+			EndDate:     end.Format(time.RFC3339),
+			Status:      subStatuses[i%len(subStatuses)],
+			Price:       price,
+			CreatedAt:   start.Format(time.RFC3339),
+		}
+		row.Lawyer = struct {
 			ID    string `json:"id"`
 			Name  string `json:"name"`
 			Email string `json:"email"`
 			Phone string `json:"phone"`
 		}{
-			ID:    defaultSubscriptions[i].LawyerID,
-			Name:  defaultSubscriptions[i].LawyerName,
-			Email: defaultSubscriptions[i].LawyerID + "@example.com",
-			Phone: "+213000000000",
+			ID:    lawyerID,
+			Name:  lawyerName,
+			Email: fmt.Sprintf("law.request.%d@example.com", lawyerIdx),
+			Phone: fmt.Sprintf("+213550%05d", (lawyerIdx*4241)%100000),
 		}
-		defaultSubscriptions[i].Package = struct {
+		row.Package = struct {
 			ID    string  `json:"id"`
 			Name  string  `json:"name"`
 			Price float64 `json:"price"`
 		}{
-			ID:    defaultSubscriptions[i].PackageID,
-			Name:  defaultSubscriptions[i].PackageName,
-			Price: defaultSubscriptions[i].Price,
+			ID:    pkgID,
+			Name:  pkgName,
+			Price: price,
 		}
-		key := "subscriptions/" + defaultSubscriptions[i].ID
+		key := "subscriptions/" + row.ID
 		if _, getErr := subscriptionsDB.Get(key); getErr != nil {
-			if putErr := putJSON(subscriptionsDB, key, defaultSubscriptions[i]); putErr != nil {
+			if putErr := putJSON(subscriptionsDB, key, row); putErr != nil {
 				return putErr
 			}
 		}
+	}
+
+	kv, kvErr := kvDB()
+	if kvErr != nil {
+		return kvErr
+	}
+	if err := seedKvDemoLawyers(kv); err != nil {
+		return err
 	}
 
 	return nil
