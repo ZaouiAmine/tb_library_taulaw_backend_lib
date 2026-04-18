@@ -1719,6 +1719,16 @@ func handlePostAdminReportsActionNest(h httpevent.Event) uint32 {
 	return writeNest(h, 200, row)
 }
 
+func handlePostAdminSeedDemo(h httpevent.Event) uint32 {
+	if err := seedDefaultData(); err != nil {
+		return writeNestError(h, 500, err.Error())
+	}
+	return writeNest(h, 200, map[string]any{
+		"ok":      true,
+		"message": "seed complete (only missing keys are inserted; existing rows unchanged)",
+	})
+}
+
 const (
 	adminUsersMatcher      = "admin_users"
 	statesMatcher          = "states"
@@ -3806,6 +3816,10 @@ func routePostAdminReportsAction(h httpevent.Event) uint32 {
 	return handlePostAdminReportsActionNest(h)
 }
 
+func routePostAdminSeedDemo(h httpevent.Event) uint32 {
+	return handlePostAdminSeedDemo(h)
+}
+
 func routePostAssistants(h httpevent.Event) uint32 {
 	return grPostJSON(h, "assistants")
 }
@@ -4332,6 +4346,8 @@ func dispatchLawgenHandler(name string, h httpevent.Event) uint32 {
 		return routePatchUsersMe(h)
 	case "PostAdminReportsAction":
 		return routePostAdminReportsAction(h)
+	case "PostAdminSeedDemo":
+		return routePostAdminSeedDemo(h)
 	case "PostAssistants":
 		return routePostAssistants(h)
 	case "PostAuthLogin":
@@ -5614,6 +5630,15 @@ func PostAdminReportsAction(e event.Event) uint32 {
 		return 1
 	}
 	return dispatchLawgenHandler("PostAdminReportsAction", h)
+}
+
+//export PostAdminSeedDemo
+func PostAdminSeedDemo(e event.Event) uint32 {
+	h, err := e.HTTP()
+	if err != nil {
+		return 1
+	}
+	return dispatchLawgenHandler("PostAdminSeedDemo", h)
 }
 
 //export PostAssistants
