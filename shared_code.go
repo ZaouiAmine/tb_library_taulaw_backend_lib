@@ -613,26 +613,62 @@ func handlePostAuthLogin(h httpevent.Event) uint32 {
 		return writeNestError(h, 400, "email and password required")
 	}
 	u, err := findUserByEmail(db, email)
-	if err != nil || u == nil {
+	if err == nil && u != nil {
+		if u.Role == userRoleLawyer && u.Status != userStatusAccepted {
+			return writeNestError(h, 400, "lawyer not accepted")
+		}
+		if u.PasswordHash != hashPassword(in.Password) {
+			return writeNestError(h, 401, "invalid email or password")
+		}
+		access, refresh := tokensForUser(u.ID)
+		u.RefreshToken = refresh
+		_ = u.save(db)
+		_ = kvPutJSON(db, "sessions/"+access, map[string]string{"userId": u.ID})
+		_ = kvPutJSON(db, "refresh/"+refresh, map[string]string{"userId": u.ID})
+		resp := map[string]any{
+			"accessToken":  access,
+			"refreshToken": refresh,
+			"user":         u.publicDTO(),
+		}
+		// Admin SPA expects envelope code 201 (see AuthContext).
+		return writeNest(h, 201, resp)
+	}
+
+	// Seeded admin lives in admin_users DB, not in KV — same path as /auth/login for the admin site.
+	_ = seedDefaultData()
+	adminDB, admErr := database.New(adminUsersMatcher)
+	if admErr != nil {
+		return writeNestError(h, 500, "database unavailable")
+	}
+	adminUsers, listErr := listByPrefix[adminUser](adminDB, "admin_users/")
+	if listErr != nil {
+		return writeNestError(h, 500, "database unavailable")
+	}
+	wantHash := hashPassword(in.Password)
+	var matched *adminUser
+	for i := range adminUsers {
+		if normalize(adminUsers[i].Email) == email && adminUsers[i].PasswordHash == wantHash {
+			matched = &adminUsers[i]
+			break
+		}
+	}
+	if matched == nil {
 		return writeNestError(h, 404, "user not found")
 	}
-	if u.Role == userRoleLawyer && u.Status != userStatusAccepted {
-		return writeNestError(h, 400, "lawyer not accepted")
-	}
-	if u.PasswordHash != hashPassword(in.Password) {
-		return writeNestError(h, 401, "invalid email or password")
-	}
-	access, refresh := tokensForUser(u.ID)
-	u.RefreshToken = refresh
-	_ = u.save(db)
-	_ = kvPutJSON(db, "sessions/"+access, map[string]string{"userId": u.ID})
-	_ = kvPutJSON(db, "refresh/"+refresh, map[string]string{"userId": u.ID})
+	access, refresh := tokensForUser(matched.ID)
+	_ = kvPutJSON(db, "sessions/"+access, map[string]string{"userId": matched.ID})
+	_ = kvPutJSON(db, "refresh/"+refresh, map[string]string{"userId": matched.ID})
 	resp := map[string]any{
 		"accessToken":  access,
 		"refreshToken": refresh,
-		"user":         u.publicDTO(),
+		"user": map[string]any{
+			"id":    matched.ID,
+			"email": matched.Email,
+			"name":  "Admin",
+			"role":  "admin",
+		},
 	}
-	return writeNest(h, 200, resp)
+	return writeNest(h, 201, resp)
 }
 
 func handlePostAuthRegister(h httpevent.Event) uint32 {
