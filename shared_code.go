@@ -88,7 +88,7 @@ type resetPwdBody struct {
 	NewPassword string `json:"newPassword"`
 }
 
-const lawgenKVMatcher = "taulaw_kv"
+const taulawKVMatcher = "taulaw_kv"
 
 func writeNest(h httpevent.Event, httpStatus int, payload any) uint32 {
 	type envelope struct {
@@ -215,7 +215,7 @@ func nestPagination[T any](items []T, page, limit int) map[string]any {
 }
 
 func kvDB() (database.Database, error) {
-	return database.New(lawgenKVMatcher)
+	return database.New(taulawKVMatcher)
 }
 
 func kvPutJSON(db database.Database, key string, v any) error {
