@@ -190,6 +190,35 @@ func pathLast(h httpevent.Event) string {
 	return segs[len(segs)-1]
 }
 
+// idFromQueryOrMarkerPath prefers ?id=, then the segment after marker (e.g. .../update/:id), then the last
+// segment if it is not equal to marker (so /case-phases/delete without ?id= does not use "delete" as id).
+func idFromQueryOrMarkerPath(h httpevent.Event, marker string) string {
+	if s := queryStr(h, "id"); s != "" {
+		return s
+	}
+	if id := pathAfter(h, marker); id != "" {
+		return id
+	}
+	last := pathLast(h)
+	if last != "" && last != marker {
+		return last
+	}
+	return ""
+}
+
+// idFromQueryOrPathLast prefers ?id=, then the last path segment. The segment "item" is reserved for
+// static routes like GET /banners/item (Taubyte may not match :id for non-ObjectId strings in path).
+func idFromQueryOrPathLast(h httpevent.Event) string {
+	if s := queryStr(h, "id"); s != "" {
+		return s
+	}
+	last := pathLast(h)
+	if last == "item" {
+		return ""
+	}
+	return last
+}
+
 func nestPagination[T any](items []T, page, limit int) map[string]any {
 	total := len(items)
 	totalPages := 1
@@ -315,9 +344,9 @@ func localizedStore(h httpevent.Event, matcher, keyPrefix, idPrefix string) uint
 }
 
 func localizedPatch(h httpevent.Event, matcher, keyPrefix, afterMarker string) uint32 {
-	id := pathAfter(h, afterMarker)
+	id := idFromQueryOrMarkerPath(h, afterMarker)
 	if id == "" {
-		id = pathLast(h)
+		return writeNestError(h, 400, "id is required")
 	}
 	_ = seedDefaultData()
 	var payload namePayload
@@ -349,9 +378,9 @@ func localizedPatch(h httpevent.Event, matcher, keyPrefix, afterMarker string) u
 }
 
 func localizedDelete(h httpevent.Event, matcher, keyPrefix, afterMarker string) uint32 {
-	id := pathAfter(h, afterMarker)
+	id := idFromQueryOrMarkerPath(h, afterMarker)
 	if id == "" {
-		id = pathLast(h)
+		return writeNestError(h, 400, "id is required")
 	}
 	db, err := database.New(matcher)
 	if err != nil {
@@ -972,9 +1001,9 @@ func handleCreateStateNest(h httpevent.Event) uint32 {
 }
 
 func handlePatchStatesUpdateById(h httpevent.Event) uint32 {
-	id := pathAfter(h, "update")
+	id := idFromQueryOrMarkerPath(h, "update")
 	if id == "" {
-		id = pathLast(h)
+		return writeNestError(h, 400, "id is required")
 	}
 	_ = seedDefaultData()
 	var payload namePayload
@@ -1006,9 +1035,9 @@ func handlePatchStatesUpdateById(h httpevent.Event) uint32 {
 }
 
 func handleDeleteStatesDeleteById(h httpevent.Event) uint32 {
-	id := pathAfter(h, "delete")
+	id := idFromQueryOrMarkerPath(h, "delete")
 	if id == "" {
-		id = pathLast(h)
+		return writeNestError(h, 400, "id is required")
 	}
 	db, err := database.New(statesMatcher)
 	if err != nil {
@@ -1355,7 +1384,10 @@ func handleGetBannersPublic(h httpevent.Event, activeOnly bool) uint32 {
 
 func handleBannerByID(h httpevent.Event) uint32 {
 	_ = seedDefaultData()
-	id := pathLast(h)
+	id := idFromQueryOrPathLast(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	db, err := database.New(bannersMatcher)
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
@@ -1393,7 +1425,10 @@ func handlePostBanner(h httpevent.Event) uint32 {
 
 func handlePatchBanner(h httpevent.Event) uint32 {
 	_ = seedDefaultData()
-	id := pathLast(h)
+	id := idFromQueryOrPathLast(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	body, err := io.ReadAll(h.Body())
 	if err != nil {
 		return writeNestError(h, 400, "invalid body")
@@ -1430,7 +1465,10 @@ func handlePatchBanner(h httpevent.Event) uint32 {
 }
 
 func handleDeleteBanner(h httpevent.Event) uint32 {
-	id := pathLast(h)
+	id := idFromQueryOrPathLast(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	db, err := database.New(bannersMatcher)
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
@@ -1467,7 +1505,10 @@ func handleListConsultationPackagesNest(h httpevent.Event) uint32 {
 
 func handleConsultationPackageByID(h httpevent.Event) uint32 {
 	_ = seedDefaultData()
-	id := pathLast(h)
+	id := idFromQueryOrPathLast(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	db, err := database.New(consultationsMatcher)
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
@@ -1505,7 +1546,10 @@ func handlePostConsultationPackage(h httpevent.Event) uint32 {
 
 func handlePatchConsultationPackage(h httpevent.Event) uint32 {
 	_ = seedDefaultData()
-	id := pathLast(h)
+	id := idFromQueryOrPathLast(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	body, err := io.ReadAll(h.Body())
 	if err != nil {
 		return writeNestError(h, 400, "invalid body")
@@ -1540,7 +1584,10 @@ func handlePatchConsultationPackage(h httpevent.Event) uint32 {
 }
 
 func handleDeleteConsultationPackage(h httpevent.Event) uint32 {
-	id := pathLast(h)
+	id := idFromQueryOrPathLast(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	db, err := database.New(consultationsMatcher)
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
@@ -1573,7 +1620,10 @@ func handleListLawyerPackagesNest(h httpevent.Event) uint32 {
 
 func handleLawyerPackageByID(h httpevent.Event) uint32 {
 	_ = seedDefaultData()
-	id := pathLast(h)
+	id := idFromQueryOrPathLast(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	db, err := database.New(lawyerPackagesMatcher)
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
@@ -1614,7 +1664,10 @@ func handlePostLawyerPackage(h httpevent.Event) uint32 {
 
 func handlePatchLawyerPackage(h httpevent.Event) uint32 {
 	_ = seedDefaultData()
-	id := pathLast(h)
+	id := idFromQueryOrPathLast(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	body, err := io.ReadAll(h.Body())
 	if err != nil {
 		return writeNestError(h, 400, "invalid body")
@@ -1655,7 +1708,10 @@ func handlePatchLawyerPackage(h httpevent.Event) uint32 {
 }
 
 func handleDeleteLawyerPackage(h httpevent.Event) uint32 {
-	id := pathLast(h)
+	id := idFromQueryOrPathLast(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	db, err := database.New(lawyerPackagesMatcher)
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
