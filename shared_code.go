@@ -219,6 +219,43 @@ func idFromQueryOrPathLast(h httpevent.Event) string {
 	return last
 }
 
+// grDocPathSuffix marks final path segments where the document id is the second-to-last segment (e.g. .../docId/pdf).
+var grDocPathSuffix = map[string]struct{}{
+	"update": {}, "pdf": {}, "delete": {}, "read": {}, "share": {}, "download": {},
+	"relations": {}, "apply": {}, "answers": {}, "comments": {}, "files": {}, "notes": {},
+	"applications": {}, "rename": {}, "permissions": {}, "move": {}, "replies": {},
+	"update-status": {}, "file-title": {}, "save-case": {}, "get-case-notes": {}, "get-case-files": {},
+	"users-permissions": {}, "download-folder": {}, "all": {},
+}
+
+// grDocID resolves a document id for gr* KV helpers: ?id= first, otherwise path (second-to-last when last is a route suffix such as "pdf").
+func grDocID(h httpevent.Event) string {
+	if s := queryStr(h, "id"); s != "" {
+		return s
+	}
+	segs := pathSegments(h)
+	if len(segs) == 0 {
+		return ""
+	}
+	last := segs[len(segs)-1]
+	if len(segs) >= 2 {
+		prev := segs[len(segs)-2]
+		if _, ok := grDocPathSuffix[last]; ok {
+			if len(segs) == 2 {
+				return ""
+			}
+			if prev == "item" {
+				return ""
+			}
+			return prev
+		}
+	}
+	if last == "item" {
+		return ""
+	}
+	return last
+}
+
 func nestPagination[T any](items []T, page, limit int) map[string]any {
 	total := len(items)
 	totalPages := 1
@@ -466,7 +503,10 @@ func grGetByID(h httpevent.Event, coll string) uint32 {
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
 	}
-	id := pathLast(h)
+	id := grDocID(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	doc, err := docGet(db, coll, id)
 	if err != nil || doc == nil {
 		return writeNestError(h, 404, "not found")
@@ -504,7 +544,10 @@ func grPatchJSON(h httpevent.Event, coll string) uint32 {
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
 	}
-	id := pathLast(h)
+	id := grDocID(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	body, err := io.ReadAll(h.Body())
 	if err != nil {
 		return writeNestError(h, 400, "invalid body")
@@ -529,7 +572,10 @@ func grDelete(h httpevent.Event, coll string) uint32 {
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
 	}
-	id := pathLast(h)
+	id := grDocID(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	if err := docDelete(db, coll, id); err != nil {
 		return writeNestError(h, 404, "not found")
 	}
@@ -551,6 +597,31 @@ const (
 
 func userKey(id string) string {
 	return "users/" + id
+}
+
+// lawyerUserIDFromRequest resolves a user id from query (?id=, ?userId=), the last path segment when it is a concrete id, or JSON body { "lawyerId": "..." } (for /users-lawyers/accept and similar).
+func lawyerUserIDFromRequest(h httpevent.Event) string {
+	if s := queryStr(h, "id"); s != "" {
+		return s
+	}
+	if s := queryStr(h, "userId"); s != "" {
+		return s
+	}
+	last := pathLast(h)
+	if last != "" && last != "item" && last != "accept" && last != "verifiying" && last != "reject" {
+		return last
+	}
+	body, err := io.ReadAll(h.Body())
+	if err != nil || len(body) == 0 {
+		return ""
+	}
+	var m struct {
+		LawyerID string `json:"lawyerId"`
+	}
+	if json.Unmarshal(body, &m) != nil {
+		return ""
+	}
+	return strings.TrimSpace(m.LawyerID)
 }
 
 func userEmailIndexKey(email string) string {
@@ -1184,7 +1255,16 @@ func handleGetUsersLawyersById(h httpevent.Event) uint32 {
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
 	}
-	id := pathLast(h)
+	id := idFromQueryOrPathLast(h)
+	if id == "" {
+		id = queryStr(h, "id")
+	}
+	if id == "" {
+		id = queryStr(h, "userId")
+	}
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	var u kvUser
 	if err := kvGetJSON(db, userKey(id), &u); err != nil {
 		return writeNestError(h, 404, "not found")
@@ -1262,7 +1342,10 @@ func handleLawyerStatus(h httpevent.Event, status int) uint32 {
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
 	}
-	id := pathLast(h)
+	id := lawyerUserIDFromRequest(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	var u kvUser
 	if err := kvGetJSON(db, userKey(id), &u); err != nil {
 		return writeNestError(h, 404, "not found")
@@ -1277,7 +1360,10 @@ func handlePatchUsersLawyersAcceptVerifiyingById(h httpevent.Event) uint32 {
 	if err != nil {
 		return writeNestError(h, 500, "database unavailable")
 	}
-	id := pathLast(h)
+	id := lawyerUserIDFromRequest(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
 	var u kvUser
 	if err := kvGetJSON(db, userKey(id), &u); err != nil {
 		return writeNestError(h, 404, "not found")
@@ -3697,7 +3783,11 @@ func routeGetPetitionsById(h httpevent.Event) uint32 {
 }
 
 func routeGetPetitionsByIdPdf(h httpevent.Event) uint32 {
-	return grOKMap(h, map[string]any{"url": "/petitions/pdf/" + pathLast(h)})
+	id := grDocID(h)
+	if id == "" {
+		return writeNestError(h, 400, "id is required")
+	}
+	return grOKMap(h, map[string]any{"url": "/petitions/pdf/" + id})
 }
 
 func routeGetPetitionsFinal(h httpevent.Event) uint32 {
@@ -4397,6 +4487,8 @@ func dispatchLawgenHandler(name string, h httpevent.Event) uint32 {
 	case "PatchUsersChangePassword":
 		return routePatchUsersChangePassword(h)
 	case "PatchUsersLawyersAcceptVerifiyingById":
+		return routePatchUsersLawyersAcceptVerifiyingById(h)
+	case "PutUsersLawyersAcceptVerifiyingById":
 		return routePatchUsersLawyersAcceptVerifiyingById(h)
 	case "PatchUsersMe":
 		return routePatchUsersMe(h)
@@ -5668,6 +5760,15 @@ func PatchUsersLawyersAcceptVerifiyingById(e event.Event) uint32 {
 		return 1
 	}
 	return dispatchLawgenHandler("PatchUsersLawyersAcceptVerifiyingById", h)
+}
+
+//export PutUsersLawyersAcceptVerifiyingById
+func PutUsersLawyersAcceptVerifiyingById(e event.Event) uint32 {
+	h, err := e.HTTP()
+	if err != nil {
+		return 1
+	}
+	return dispatchLawgenHandler("PutUsersLawyersAcceptVerifiyingById", h)
 }
 
 //export PatchUsersMe
